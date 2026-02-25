@@ -1,38 +1,43 @@
 from flask import Flask, render_template, jsonify, request
 from flask_cors import CORS
-import sqlite3
-import random
+import psycopg2
 import os
+import random
 
 def create_app():
     app = Flask(__name__)
     CORS(app)
 
-    DB_NAME = "boletos.db"
+    DATABASE_URL = os.environ.get("DATABASE_URL")
 
-    # Crear base si no existe
+    if not DATABASE_URL:
+        raise Exception("DATABASE_URL no está configurada")
+
+    def get_connection():
+        return psycopg2.connect(DATABASE_URL)
+
     def init_db():
-        conn = sqlite3.connect(DB_NAME)
+        conn = get_connection()
         cur = conn.cursor()
 
         cur.execute("""
         CREATE TABLE IF NOT EXISTS boletos (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             numero INTEGER UNIQUE,
-            estado TEXT DEFAULT 'disponible',
-            usuario TEXT
+            estado VARCHAR(20) DEFAULT 'disponible',
+            usuario VARCHAR(100)
         )
         """)
 
-        # Insertar números si no existen
         cur.execute("SELECT COUNT(*) FROM boletos")
         count = cur.fetchone()[0]
 
         if count == 0:
             for i in range(1, 151):
-                cur.execute("INSERT INTO boletos (numero) VALUES (?)", (i,))
-        
+                cur.execute("INSERT INTO boletos (numero) VALUES (%s)", (i,))
+
         conn.commit()
+        cur.close()
         conn.close()
 
     init_db()
@@ -47,10 +52,11 @@ def create_app():
 
     @app.route('/api/boletos')
     def obtener_boletos():
-        conn = sqlite3.connect(DB_NAME)
+        conn = get_connection()
         cur = conn.cursor()
         cur.execute("SELECT numero, estado FROM boletos ORDER BY numero")
         data = cur.fetchall()
+        cur.close()
         conn.close()
         return jsonify(data)
 
@@ -58,41 +64,46 @@ def create_app():
     def asignar_aleatorio():
         usuario = request.json.get("usuario")
 
-        conn = sqlite3.connect(DB_NAME)
+        conn = get_connection()
         cur = conn.cursor()
 
         cur.execute("SELECT numero FROM boletos WHERE estado='disponible'")
         disponibles = cur.fetchall()
 
         if not disponibles:
+            cur.close()
             conn.close()
             return jsonify({"error": "Boletos agotados"})
 
         numero = random.choice(disponibles)[0]
 
         cur.execute(
-            "UPDATE boletos SET estado='vendido', usuario=? WHERE numero=?",
+            "UPDATE boletos SET estado='vendido', usuario=%s WHERE numero=%s",
             (usuario, numero)
         )
 
         conn.commit()
+        cur.close()
         conn.close()
 
         return jsonify({"numero": numero})
 
     @app.route('/api/ganador')
     def ganador():
-        conn = sqlite3.connect(DB_NAME)
+        conn = get_connection()
         cur = conn.cursor()
 
         cur.execute("SELECT numero, usuario FROM boletos WHERE estado='vendido'")
         vendidos = cur.fetchall()
 
         if not vendidos:
+            cur.close()
             conn.close()
             return jsonify({"error": "No hay boletos vendidos"})
 
         elegido = random.choice(vendidos)
+
+        cur.close()
         conn.close()
 
         return jsonify({
@@ -102,10 +113,11 @@ def create_app():
 
     @app.route('/api/reset', methods=['POST'])
     def reset():
-        conn = sqlite3.connect(DB_NAME)
+        conn = get_connection()
         cur = conn.cursor()
         cur.execute("UPDATE boletos SET estado='disponible', usuario=NULL")
         conn.commit()
+        cur.close()
         conn.close()
         return jsonify({"success": "Boletos reiniciados"})
 

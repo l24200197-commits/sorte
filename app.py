@@ -1,95 +1,166 @@
-async function cargarBoletos() {
+from flask import Flask, render_template, jsonify, request, Response
+from flask_cors import CORS
+import os
+import random
+import csv
+import io
 
-    const res = await fetch('/api/boletos');
-    const data = await res.json();
+def create_app():
+    app = Flask(__name__)
+    CORS(app)
 
-    const grid = document.getElementById('grid');
-    grid.innerHTML = '';
+    DATABASE_URL = os.environ.get("DATABASE_URL")
 
-    data.forEach(b => {
+    def get_connection():
+        if DATABASE_URL:
+            import psycopg2
+            return psycopg2.connect(DATABASE_URL)
+        else:
+            import sqlite3
+            return sqlite3.connect("boletos_local.db")
 
-        const div = document.createElement('div');
+    def init_db():
+        conn = get_connection()
+        cur = conn.cursor()
 
-        div.className = "col-1 boleto " +
-            (b[1] === 'vendido' ? 'bg-danger' : 'bg-success');
+        is_postgres = DATABASE_URL is not None
 
-        div.innerText = b[0];
-        grid.appendChild(div);
-    });
-}
+        if is_postgres:
+            cur.execute("""
+            CREATE TABLE IF NOT EXISTS boletos (
+                id SERIAL PRIMARY KEY,
+                numero INTEGER UNIQUE,
+                estado VARCHAR(20) DEFAULT 'disponible',
+                usuario VARCHAR(100)
+            )
+            """)
+        else:
+            cur.execute("""
+            CREATE TABLE IF NOT EXISTS boletos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                numero INTEGER UNIQUE,
+                estado TEXT DEFAULT 'disponible',
+                usuario TEXT
+            )
+            """)
+
+        cur.execute("SELECT COUNT(*) FROM boletos")
+        count = cur.fetchone()[0]
+
+        if count == 0:
+            for i in range(1, 81):
+                if is_postgres:
+                    cur.execute("INSERT INTO boletos (numero) VALUES (%s)", (i,))
+                else:
+                    cur.execute("INSERT INTO boletos (numero) VALUES (?)", (i,))
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+    init_db()
+
+    @app.route('/')
+    def home():
+        return render_template('index.html')
+
+    @app.route('/ganador')
+    def ganador_page():
+        return render_template('ganador.html')
+
+    # 🔥 API boletos CORREGIDA (devuelve objetos)
+    @app.route('/api/boletos')
+    def obtener_boletos():
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT numero, estado FROM boletos ORDER BY numero")
+        data = cur.fetchall()
+        cur.close()
+        conn.close()
+
+        return jsonify([
+            {"numero": row[0], "estado": row[1]}
+            for row in data
+        ])
+
+    @app.route('/api/aleatorio', methods=['POST'])
+    def asignar_aleatorio():
+        usuario = request.json.get("usuario")
+
+        if not usuario:
+            return jsonify({"error": "Nombre requerido"})
+
+        conn = get_connection()
+        cur = conn.cursor()
+
+        cur.execute("SELECT numero FROM boletos WHERE estado='disponible'")
+        disponibles = cur.fetchall()
+
+        if not disponibles:
+            cur.close()
+            conn.close()
+            return jsonify({"error": "Boletos agotados"})
+
+        numero = random.choice(disponibles)[0]
+
+        is_postgres = DATABASE_URL is not None
+
+        if is_postgres:
+            cur.execute(
+                "UPDATE boletos SET estado='vendido', usuario=%s WHERE numero=%s",
+                (usuario, numero)
+            )
+        else:
+            cur.execute(
+                "UPDATE boletos SET estado='vendido', usuario=? WHERE numero=?",
+                (usuario, numero)
+            )
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        return jsonify({"numero": numero})
+
+    @app.route('/api/exportar')
+    def exportar():
+        conn = get_connection()
+        cur = conn.cursor()
+
+        cur.execute("""
+            SELECT numero, usuario
+            FROM boletos
+            WHERE estado='vendido'
+            ORDER BY numero
+        """)
+
+        vendidos = cur.fetchall()
+        cur.close()
+        conn.close()
+
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(["Numero", "Usuario"])
+
+        for row in vendidos:
+            writer.writerow(row)
+
+        output.seek(0)
+
+        return Response(
+            output,
+            mimetype="text/csv",
+            headers={
+                "Content-Disposition":
+                "attachment; filename=boletos_vendidos.csv"
+            }
+        )
+
+    return app
 
 
+app = create_app()
 
-async function aleatorio() {
-
-    const usuario = document.getElementById('usuario').value;
-
-    if (!usuario) {
-        alert("Escribe tu nombre primero");
-        return;
-    }
-
-    const ruleta = document.getElementById("ruletaNumero");
-
-    // 🔹 Obtener boletos actuales
-    const resBoletos = await fetch('/api/boletos');
-    const boletos = await resBoletos.json();
-
-    // 🔹 Filtrar solo disponibles
-    const disponibles = boletos
-        .filter(b => b[1] !== 'vendido')
-        .map(b => b[0]);
-
-    if (disponibles.length === 0) {
-        alert("Boletos agotados");
-        return;
-    }
-
-    let contador = 0;
-
-    // 🔹 Animación usando SOLO números disponibles
-    const intervalo = setInterval(() => {
-
-        const randomIndex = Math.floor(Math.random() * disponibles.length);
-        ruleta.innerText = disponibles[randomIndex];
-
-        ruleta.style.transform = "scale(1.3)";
-        setTimeout(() => {
-            ruleta.style.transform = "scale(1)";
-        }, 100);
-
-        contador++;
-
-        if (contador > 25) {
-            clearInterval(intervalo);
-        }
-
-    }, 80);
-
-
-    // 🔹 Confirmar número real desde backend
-    setTimeout(async () => {
-
-        const res = await fetch('/api/aleatorio', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({usuario})
-        });
-
-        const data = await res.json();
-
-        if (data.numero) {
-            ruleta.innerText = data.numero;
-            alert("Tu número asignado es: " + data.numero);
-        } else {
-            ruleta.innerText = "❌";
-            alert(data.error);
-        }
-
-        cargarBoletos();
-
-    }, 2200);
-}
-
-
-cargarBoletos();
+if __name__ == '__main__':
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)

@@ -11,12 +11,14 @@ async function cargarBoletos() {
         const div = document.createElement('div');
 
         div.className = "col-1 boleto " +
-            (b[1] === 'vendido' ? 'bg-danger' : 'bg-success');
+            (b.estado === 'vendido' ? 'bg-danger' : 'bg-success');
 
-        div.innerText = b[0];
+        div.innerText = b.numero;
+
         grid.appendChild(div);
     });
 }
+
 
 
 async function aleatorio() {
@@ -29,30 +31,39 @@ async function aleatorio() {
     }
 
     const ruleta = document.getElementById("ruletaNumero");
-    let contador = 0;
 
-    // 🔹 Animación ajustada a 80 números
-    const intervalo = setInterval(() => {
+    const resBoletos = await fetch('/api/boletos');
+    const boletos = await resBoletos.json();
 
-        const randomTemp = Math.floor(Math.random() * 80) + 1;
-        ruleta.innerText = randomTemp;
+    const disponibles = boletos
+        .filter(b => b.estado !== 'vendido')
+        .map(b => b.numero);
 
-        ruleta.style.transform = "scale(1.3)";
-        setTimeout(() => {
-            ruleta.style.transform = "scale(1)";
-        }, 100);
+    if (disponibles.length === 0) {
+        alert("Boletos agotados");
+        return;
+    }
 
-        contador++;
+    let velocidad = 40;
+    let vueltas = 0;
+    let maxVueltas = 40;
 
-        if (contador > 25) {
-            clearInterval(intervalo);
+    function girar() {
+
+        const randomIndex = Math.floor(Math.random() * disponibles.length);
+        ruleta.innerText = disponibles[randomIndex];
+
+        vueltas++;
+
+        if (vueltas < maxVueltas) {
+            velocidad += 8;
+            setTimeout(girar, velocidad);
+        } else {
+            confirmarNumero();
         }
+    }
 
-    }, 80);
-
-
-    // 🔹 Después de animación, pedir número real al backend
-    setTimeout(async () => {
+    async function confirmarNumero() {
 
         const res = await fetch('/api/aleatorio', {
             method: 'POST',
@@ -71,8 +82,9 @@ async function aleatorio() {
         }
 
         cargarBoletos();
+    }
 
-    }, 2200);
+    girar();
 }
 
 

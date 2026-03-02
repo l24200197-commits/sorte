@@ -9,6 +9,7 @@ async function cargarBoletos() {
     data.forEach(b => {
 
         const div = document.createElement('div');
+
         div.className = "col-1 boleto " +
             (b[1] === 'vendido' ? 'bg-danger' : 'bg-success');
 
@@ -16,7 +17,6 @@ async function cargarBoletos() {
         grid.appendChild(div);
     });
 }
-
 
 
 async function aleatorio() {
@@ -31,10 +31,10 @@ async function aleatorio() {
     const ruleta = document.getElementById("ruletaNumero");
     let contador = 0;
 
-    // Animación tipo ruleta
+    // 🔹 Animación ajustada a 80 números
     const intervalo = setInterval(() => {
 
-        const randomTemp = Math.floor(Math.random() * 150) + 1;
+        const randomTemp = Math.floor(Math.random() * 80) + 1;
         ruleta.innerText = randomTemp;
 
         ruleta.style.transform = "scale(1.3)";
@@ -51,7 +51,7 @@ async function aleatorio() {
     }, 80);
 
 
-    // Después de animación, pedir número real al backend
+    // 🔹 Después de animación, pedir número real al backend
     setTimeout(async () => {
 
         const res = await fetch('/api/aleatorio', {
